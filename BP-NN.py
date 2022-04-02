@@ -1,8 +1,13 @@
 '''
 Neural Network(NN) for Iris Datas using Backward Propagation(BP)
+------------------------
 Li Tianming
 Institue of Physics, CAS
 2022.3.31
+------------------------
+Cao Zhendong
+Institue of Physics, CAS
+2022.4.02
 '''
 
 import pandas as pd
@@ -16,15 +21,33 @@ from sklearn.model_selection import train_test_split
 def sigmod(input):
 
     # avoid large input for exp
-    if input >= 0:
-        return 1.0 / (1 + np.exp(-input))
-    else:
-        return np.exp(input) / (1 + np.exp(input))
+    # if input >= 0:
+    #     return 1.0 / (1 + np.exp(-input))
+    # else:
+    #     return np.exp(input) / (1 + np.exp(input))
+    # ans = np.where(input<0, np.exp(input)/(1+np.exp(input)), 1.0/(1+np.exp(-input)))
+    # return np.where(input<0, np.exp(input)/(1+np.exp(input)), 1.0/(1+np.exp(-input)))
+    return 1.0 / (1 + np.exp(-input))
+
+# frompyfunc(func, cin_num, cout_num)
+# sigmod_np =  np.frompyfunc(sigmod, 1, 1)
 
 def dsigmod(input):
 
-    ans = sigmod(input) * (1 - sigmod(input))
-    return ans
+    # ans = sigmod(input) * (1 - sigmod(input))
+    return sigmod(input) * (1 - sigmod(input))
+
+def relu(input):
+    return np.where(input<0, 0, input)
+
+def drelu(input):
+    return np.where(input<0, 0, 1.0)
+
+def lrelu(input):
+    return np.where(input<0, 0.01*input, input)
+
+def dlrelu(input):
+    return np.where(input<0, 0.01, 1.0)
 
 def change_label(data_y):
 
@@ -37,7 +60,7 @@ def change_label(data_y):
 
 class nn_paras(object):
 
-    def __init__(self, n_paras, ini_seed=2):
+    def __init__(self, n_paras, func='sigmod', Type='float32', ini_seed=2):
 
         # def nn_model size
         self.ni = n_paras['ni']
@@ -46,61 +69,105 @@ class nn_paras(object):
 
         # def net_paras
         np.random.seed(ini_seed)
-        self.wh = np.random.randn(self.nh, self.ni)
-        self.wo = np.random.randn(self.no, self.nh)
+        # randn: loc=0, sigma=1; same as .normal(loc, scale, size)
+        self.wh = np.random.randn(self.nh, self.ni).astype(Type)
+        self.wo = np.random.randn(self.no, self.nh).astype(Type)
         
         # def cache_data
-        self.ai = np.zeros(shape=(self.ni, 1))
-        self.ah = np.zeros(shape=(self.nh, 1))
-        self.ao = np.zeros(shape=(self.no, 1))
+        self.ai = np.zeros(shape=(self.ni, 1)).astype(Type)
+        self.ah = np.zeros(shape=(self.nh, 1)).astype(Type)
+        self.ao = np.zeros(shape=(self.no, 1)).astype(Type)
+
+        # def excitation function
+        # func in ['sigmod', 'relu', 'lrelu']
+        self.func = eval(func)
+        self.dfunc = eval('d'+func)
+        self.Type = Type
 
     def forward_propagation(self, data_x):
 
+        # '''for codes''' are same as the below np.array expression
+        # However, np.array ones 10 times faster
+        '''
         for i in range(self.ni):
             self.ai[i] = data_x[i]
+        '''
+        self.ai = data_x.astype(self.Type)
+
+        '''
         for j in range(self.nh):
-            sum = 0.0
-            for i in range(self.ni):
-                sum += self.wh[j][i] * self.ai[i]
-            self.ah[j] = sigmod(sum)
+            # sum = 0.0
+            # for i in range(self.ni):
+            #     sum += self.wh[j][i] * self.ai[i]
+            sum = np.matmul(self.wh[j,:], self.ai)
+            self.ah[j] = self.func(sum)
+        '''
+        sum = np.matmul(self.wh, self.ai).astype(self.Type)
+        self.ah = self.func(sum)
+        
+        '''
         for k in range(self.no):
             sum = 0.0
             for j in range(self.nh):
                 sum += self.wo[k][j] * self.ah[j]
-            self.ao[k] = sigmod(sum)
+            self.ao[k] = self.dfunc(sum)
+        '''
+        sum = np.matmul(self.wo, self.ah).astype(self.Type)
+        self.ao = self.func(sum)
 
     def compute_error(self, label_y):
 
+        '''
         error = 0.0
         for k in range(self.no):
             error += 0.5 * (label_y[k] - self.ao[k])**2
+        '''
+        error = np.sum(0.5*(label_y-self.ao)**2)
         return error
     
     def backward_propagation(self, label_y, learning_rate=0.4):
 
         # error for output
+        '''
         output_deltas = np.zeros(shape=(self.no, 1))
         for k in range(self.no):
             error = label_y[k] - self.ao[k]
-            output_deltas[k] = error * dsigmod(self.ao[k])
+            output_deltas[k] = error * self.dfunc(self.ao[k])
+        '''
+        label_y = np.array(label_y).astype(self.Type)
+        error = label_y - self.ao
+        output_deltas = (error * self.dfunc(self.ao)).reshape((self.no, 1))
 
         # error for hidden
+        '''
         hidden_deltas = np.zeros(shape=(self.nh, 1))
         for j in range(self.nh):
-            error = 0.0
-            for k in range(self.no):
-                error += output_deltas[k] * self.wo[k][j]
-            hidden_deltas[j] = error * dsigmod(self.ah[j])
+            # error = 0.0
+            # for k in range(self.no):
+            #     error += output_deltas[k] * self.wo[k][j]
+            error = np.matmul(output_deltas.T, self.wo[:,j].reshape((self.no, 1)))
+            hidden_deltas[j] = error * self.dfunc(self.ah[j])
+        '''
+        error = np.matmul(self.wo.T, output_deltas).astype(self.Type)
+        hidden_deltas = error * self.dfunc(self.ah).reshape((self.nh, 1))
 
         # update grads
+        '''
         for j in range(self.nh):
             for k in range(self.no):
                 change = output_deltas[k] * self.ah[j]
                 self.wo[k][j] += learning_rate * change
+        '''
+        change = output_deltas * self.ah.T
+        self.wo += learning_rate * change
+        '''
         for i in range(self.ni):
             for j in range(self.nh):
                 change = hidden_deltas[j] * self.ai[i]
                 self.wh[j][i] += learning_rate * change
+        '''
+        change = hidden_deltas * self.ai.T
+        self.wh += learning_rate * change 
 
 def predict(paras, datas):
 
@@ -185,13 +252,18 @@ if __name__ == "__main__":
         iterations: for the times iterating all train_data
         print_error: print error or not
         n_paras: structure for 3-layer NN_model
+        restore_type: 'float16', 'float32', 'float64'
+        excit_func: 'sigmod', 'relu', 'lrelu'
     '''
     # random paras
     seed = 2
-    state = 26
-    learning_rate = 0.02
+    state = 14
+    learning_rate = 0.01
     iterations = 1000
     print_error = True
+    restore_type = 'float32'
+    excit_func = 'lrelu'
+    print('Excited func: {}'.format(excit_func))
 
     # define n_paras
     n_paras = {'ni':4, 'nh':10, 'no':3}
@@ -210,7 +282,7 @@ if __name__ == "__main__":
 
     # build nn_model
     start_time = datetime.datetime.now()
-    nn_model = nn_paras(n_paras,ini_seed=seed)
+    nn_model = nn_paras(n_paras, func=excit_func, Type=restore_type, ini_seed=seed)
 
     for time in range(iterations):
         num = train_data.shape[0]
